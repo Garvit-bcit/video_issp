@@ -113,6 +113,28 @@ def upload():
     return jsonify(id=video_id), 201
 
 
+@app.delete('/api/videos/<video_id>')
+def delete_video(video_id):
+    # Do not remove a video while its background transcription is using it.
+    video = fetch_video(video_id)
+    if video['status'] == 'transcribing':
+        return jsonify(error='Wait for transcription to finish before deleting this video.'), 409
+
+    video_path = (VIDEOS / video['filename']).resolve()
+    videos_dir = VIDEOS.resolve()
+    if video_path.parent != videos_dir:
+        return jsonify(error='Invalid video file path.'), 400
+
+    # Remove the video and all its saved instructions in one database transaction.
+    with conn() as db:
+        db.execute('DELETE FROM steps WHERE video_id=?', (video_id,))
+        db.execute('DELETE FROM videos WHERE id=?', (video_id,))
+
+    # The database entry is removed first; missing files are okay.
+    video_path.unlink(missing_ok=True)
+    return '', 204
+
+
 @app.get('/api/videos/<video_id>')
 def details(video_id):
     v = fetch_video(video_id)
