@@ -1,0 +1,96 @@
+{% extends 'base.html' %}
+
+{% block title %}
+About · Training Video Workspace
+{% endblock %}
+
+{% block crumb %}
+ABOUT
+{% endblock %}
+
+{% block page_heading %}
+About the workspace
+{% endblock %}
+
+{% block content %}
+<section class="hero-panel">
+ <p class="eyebrow">
+  FROM VIDEO TO STANDARD WORK
+ </p>
+ <h2>
+  Make practical knowledge easier to follow, share, and maintain.
+ </h2>
+ <p class="lead">
+  Training Video Workspace helps teams turn unstructured training recordings into timestamped transcripts, clear step-by-step instructions, and reviewable Standard Operating Procedures.
+ </p>
+</section>
+<div class="feature-grid">
+ <article class="panel">
+  <span class="feature-number">
+   01
+  </span>
+  <h3>
+   Capture the process
+  </h3>
+  <p>
+   Upload a training recording and use local faster-whisper transcription to produce text segments with timestamps.
+  </p>
+ </article>
+ <article class="panel">
+  <span class="feature-number">
+   02
+  </span>
+  <h3>
+   Structure the knowledge
+  </h3>
+  <p>
+   Review transcript sections, edit instructions, and use a configurable AI provider to draft a procedure from source material.
+  </p>
+ </article>
+ <article class="panel">
+  <span class="feature-number">
+   03
+  </span>
+  <h3>
+   Publish documentation
+  </h3>
+  <p>
+   Review generated steps, correct uncertainties, and export a professional PDF with headings, timestamps, and page numbers.
+  </p>
+ </article>
+</div>
+<section class="panel">
+ <h2>
+  Why it was developed
+ </h2>
+ <p>
+  This workspace reduces the effort required to convert tacit, video-based know-how into consistent working documentation. It keeps instructions connected to the relevant moment in the source recording so reviewers can verify details instead of relying on memory.
+ </p>
+ <h2>
+  How AI is used
+ </h2>
+ <p>
+  Speech recognition creates a timestamped transcript. When configured, an external AI service organizes that transcript into an SOP draft, including process overview, purpose, prerequisites, warnings, ordered steps, expected outcomes, and summary. AI output is a draft—not an approved procedure—and uncertain or unsupported information should be reviewed by a person.
+ </p>
+ <h2>
+  Typical workflow
+ </h2>
+ <ol class="workflow-list">
+  <li>
+   Upload a training video.
+  </li>
+  <li>
+   Transcribe the audio and review timestamped segments.
+  </li>
+  <li>
+   Edit transcript segments into actionable instructions.
+  </li>
+  <li>
+   Generate an AI SOP draft when an AI API is configured.
+  </li>
+  <li>
+   Review and edit the content, then download the PDF.
+  </li>
+ </ol>
+</section>
+{% endblock %}

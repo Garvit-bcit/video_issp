@@ -1,4 +1,10 @@
 Flask>=3.0,<4
+Flask-SQLAlchemy>=3.1,<4
+Flask-Login>=0.6,<1
+Flask-WTF>=1.2,<2
 python-dotenv>=1.0
 reportlab>=4.0
-# Optional for real transcription: pip install faster-whisper
+psycopg[binary]>=3.2
+gunicorn>=22,<24
+faster-whisper>=1.1,<2
+av<19

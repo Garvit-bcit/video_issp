@@ -1,0 +1,39 @@
+{% extends 'base.html' %}
+
+{% block title %}
+Sign in · Training Video Workspace
+{% endblock %}
+
+{% block content %}
+<section class="login-card">
+ <div class="brand-mark large">
+  TV
+ </div>
+ <p class="eyebrow">
+  SECURE WORKSPACE
+ </p>
+ <h1>
+  Welcome back
+ </h1>
+ <p class="muted">
+  Sign in to access your training videos and documents.
+ </p>
+ <form action="{{ url_for('login_post') }}" method="post">
+  <input name="_csrf_token" type="hidden" value="{{ csrf_token }}"/>
+  <label>
+   Username
+   <input autocomplete="username" autofocus="" name="username" required=""/>
+  </label>
+  <label>
+   Password
+   <input autocomplete="current-password" name="password" required="" type="password"/>
+  </label>
+  <button class="primary full" type="submit">
+   Sign in
+  </button>
+ </form>
+ <p class="tiny muted">
+  Accounts are provisioned by your workspace administrator.
+ </p>
+</section>
+{% endblock %}

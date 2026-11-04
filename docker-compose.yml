@@ -1,0 +1,37 @@
+services:
+  web:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://training:${POSTGRES_PASSWORD}@db:5432/training
+      DATA_DIR: /data
+      VIDEO_STORAGE: /data/videos
+      REPORT_STORAGE: /data/reports
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      DEPLOYMENT_MODE: production
+    ports:
+      - "127.0.0.1:5000:5000"
+    volumes:
+      - app_data:/data
+    depends_on:
+      db:
+        condition: service_healthy
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: training
+      POSTGRES_USER: training
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U training -d training"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    # Intentionally no public host port.
+volumes:
+  app_data:
+  postgres_data:

@@ -1,0 +1,162 @@
+
+{% extends 'base.html' %}
+
+{% block title %}
+Admin panel · Training Video Workspace
+{% endblock %}
+
+{% block crumb %}
+ADMINISTRATION
+{% endblock %}
+
+{% block page_heading %}
+User administration
+{% endblock %}
+
+{% block content %}
+
+<section class="panel">
+    <p class="muted">
+        Create accounts and manage roles and access. Passwords are stored as secure hashes.
+    </p>
+
+    <h2>Create a user</h2>
+
+    <form action="{{ url_for('create_user') }}" class="admin-create" method="post">
+        <input name="_csrf_token" type="hidden" value="{{ csrf_token }}">
+
+        <label>
+            Username
+            <input
+                name="username"
+                minlength="3"
+                required
+            >
+        </label>
+
+        <label>
+            Temporary password
+            <input
+                type="password"
+                name="password"
+                autocomplete="new-password"
+                minlength="12"
+                required
+            >
+        </label>
+
+        <label>
+            Role
+            <select name="role">
+                <option value="user">Normal user</option>
+                <option value="admin">Administrator</option>
+            </select>
+        </label>
+
+        <button class="primary" type="submit">
+            Create account
+        </button>
+    </form>
+</section>
+
+<section class="panel">
+    <h2>Workspace accounts</h2>
+
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Username</th>
+                    <th>Role / access</th>
+                    <th>Update account</th>
+                </tr>
+            </thead>
+
+            <tbody>
+                {% for u in users %}
+                <tr>
+                    <td>
+                        <strong>{{ u.username }}</strong>
+                        <small>
+                            Created {{ u.created_at.strftime('%Y-%m-%d') if u.created_at else '—' }}
+                        </small>
+                    </td>
+
+                    <td>
+                        {{ u.role|title }} · {{ 'Enabled' if u.enabled else 'Disabled' }}
+                    </td>
+
+                    <td>
+                        <form
+                            action="{{ url_for('update_user', uid=u.id) }}"
+                            class="admin-edit"
+                            method="post"
+                        >
+                            <input name="_csrf_token" type="hidden" value="{{ csrf_token }}">
+
+                            <label>
+                                Role
+                                <select name="role">
+                                    <option value="user" {% if u.role == 'user' %}selected{% endif %}>
+                                        Normal user
+                                    </option>
+                                    <option value="admin" {% if u.role == 'admin' %}selected{% endif %}>
+                                        Administrator
+                                    </option>
+                                </select>
+                            </label>
+
+                            <label>
+                                Account status
+                                <select name="enabled">
+                                    <option value="1" {% if u.enabled %}selected{% endif %}>
+                                        Enabled
+                                    </option>
+                                    <option value="0" {% if not u.enabled %}selected{% endif %}>
+                                        Disabled
+                                    </option>
+                                </select>
+                            </label>
+
+                            <label>
+                                New password (optional)
+                                <input
+                                    type="password"
+                                    name="password"
+                                    placeholder="Leave blank to keep current password"
+                                    minlength="12"
+                                    autocomplete="new-password"
+                                >
+                            </label>
+
+                            <button class="secondary" type="submit">
+                                Save changes
+                            </button>
+                        </form>
+
+                        {% if u.id != current_user.id %}
+                        <form
+                            action="{{ url_for('delete_user', uid=u.id) }}"
+                            method="post"
+                            onsubmit="return confirm('Delete this user and their videos/documents?')"
+                        >
+                            <input name="_csrf_token" type="hidden" value="{{ csrf_token }}">
+
+                            <button class="danger small-button" type="submit">
+                                Delete account and data
+                            </button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="3">No user accounts found.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+{% endblock %}

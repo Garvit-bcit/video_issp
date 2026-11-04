@@ -1,0 +1,22 @@
+{% extends 'base.html' %}
+
+{% block title %}
+{{ code }} · Training Video Workspace
+{% endblock %}
+
+{% block content %}
+<section class="panel error-page">
+ <p class="eyebrow">
+  REQUEST COULD NOT BE COMPLETED
+ </p>
+ <h2>
+  {{ code }}
+ </h2>
+ <p>
+  {{ message }}
+ </p>
+ <a class="button-link primary" href="{{ url_for('home') }}">
+  Return to workspace
+ </a>
+</section>
+{% endblock %}

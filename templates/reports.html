@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+
+{% block title %}
+Generated documents · Training Video Workspace
+{% endblock %}
+
+{% block crumb %}
+DOCUMENT LIBRARY
+{% endblock %}
+
+{% block page_heading %}
+Generated documents
+{% endblock %}
+
+{% block content %}
+<section class="panel">
+ <div class="section-heading">
+  <div>
+   <h2>
+    Your SOP documents
+   </h2>
+   <p class="muted">
+    Documents remain associated with their source video and workspace owner.
+   </p>
+  </div>
+  <a class="button-link secondary" href="{{ url_for('home') }}">
+   Open dashboard
+  </a>
+ </div>
+ <div class="document-list" id="documentsList">
+  <p class="muted">
+   Loading documents…
+  </p>
+ </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script defer="" src="{{ url_for('static',filename='reports.js') }}">
+</script>
+{% endblock %}

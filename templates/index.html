@@ -1,7 +1,230 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Training Video Workspace</title><link rel="stylesheet" href="/static/style.css"></head><body>
-<header><div><strong>Training Video Workspace</strong><small>Local prototype · no Microsoft access needed</small></div><span class="pill">Phase 1</span></header>
-<main><aside class="panel"><h2>Your videos</h2><form id="upload"><label>Video title<input id="title" placeholder="e.g. SAP Inspection Demo"></label><label>Video file<input id="file" type="file" accept=".mp4,.mov,.webm" required></label><button type="submit">Upload video</button></form><p id="uploadMsg" class="hint"></p><div id="videoList"></div></aside>
-<section class="workspace"><div class="panel"><div class="row"><div><h1 id="videoTitle">Select or upload a video</h1><p class="hint" id="status">Create a project by uploading a recording.</p></div><div class="actions"><button id="transcribe" disabled>Transcribe locally</button><button id="pdf" disabled>Download PDF</button></div></div><video id="player" controls preload="metadata"></video><p class="hint">Click a step's timestamp to jump to that part of the video. Transcript sections can be edited into targeted instructions.</p></div>
-<div class="panel"><div class="row"><h2>Interactive instructions</h2><button id="newStep" disabled>+ Add step</button></div><div id="steps"><p class="hint">No video selected.</p></div></div></section></main>
-<dialog id="editor"><form id="stepForm"><h2 id="dialogTitle">Edit step</h2><label>Step title<input id="stepTitle" required maxlength="150"></label><div class="grid"><label>Start (seconds)<input id="start" type="number" min="0" step="0.1" required></label><label>End (seconds)<input id="end" type="number" min="0" step="0.1" required></label></div><label>Instructions<textarea id="body" rows="7" required></textarea></label><div class="row"><button type="button" class="secondary" id="cancel">Cancel</button><button type="submit">Save step</button></div></form></dialog>
-<script src="/static/app.js"></script></body></html>
+{% extends 'base.html' %}
+
+{% block title %}
+Dashboard · Training Video Workspace
+{% endblock %}
+
+{% block crumb %}
+DASHBOARD
+{% endblock %}
+
+{% block page_heading %}
+Training dashboard
+{% endblock %}
+
+{% block content %}
+<section class="welcome-row">
+ <div>
+  <p class="muted">
+   Turn training recordings into clear, reviewable work instructions.
+  </p>
+ </div>
+ <div class="mini-stat">
+  <strong id="videoCount">
+   —
+  </strong>
+  <span>
+   videos in workspace
+  </span>
+ </div>
+</section>
+<div class="dashboard-grid">
+ <aside class="panel library-panel">
+  <div class="section-heading">
+   <div>
+    <p class="eyebrow">
+     LIBRARY
+    </p>
+    <h2>
+     My videos
+    </h2>
+   </div>
+   <span class="count-pill" id="libraryCount">
+    0
+   </span>
+  </div>
+  <form class="upload-form" id="upload">
+   <label>
+    Video title
+    <input id="title" maxlength="150" placeholder="e.g. Supplier inspection workflow"/>
+   </label>
+   <label class="file-drop">
+    <span class="file-icon">
+     ↑
+    </span>
+    <span>
+     <strong>
+      Choose a training video
+     </strong>
+     <small>
+      MP4, MOV or WebM
+     </small>
+    </span>
+    <input accept=".mp4,.mov,.webm" id="file" required="" type="file"/>
+   </label>
+   <button class="primary full" type="submit">
+    Upload video
+   </button>
+   <p class="inline-message" id="uploadMsg" role="status">
+   </p>
+  </form>
+  <div class="video-list" id="videoList">
+   <p class="muted">
+    Loading your videos…
+   </p>
+  </div>
+ </aside>
+ <section class="main-workspace">
+  <section class="panel player-panel">
+   <div class="section-heading">
+    <div>
+     <p class="eyebrow">
+      CURRENT VIDEO
+     </p>
+     <h2 id="videoTitle">
+      Select or upload a video
+     </h2>
+     <p class="muted" id="status">
+      Your selected video will appear here.
+     </p>
+    </div>
+    <div class="button-row">
+     <button class="secondary" disabled="" id="transcribe">
+      Transcribe
+     </button>
+     <button class="secondary" disabled="" id="pdf">
+      Export draft PDF
+     </button>
+    </div>
+   </div>
+   <video controls="" id="player" preload="metadata">
+   </video>
+   <p class="player-help">
+    Select any timestamped instruction to jump to that moment in the video.
+   </p>
+  </section>
+  <section class="panel transcript-panel">
+   <div class="section-heading">
+    <div>
+     <p class="eyebrow">
+      TRANSCRIPT &amp; INSTRUCTIONS
+     </p>
+     <h2>
+      Step-by-step workspace
+     </h2>
+    </div>
+    <button class="secondary" disabled="" id="newStep">
+     ＋ Add step
+    </button>
+   </div>
+   <div class="scroll-hint">
+    Scroll this panel independently while your video continues playing.
+   </div>
+   <div class="steps-scroll" id="steps">
+    <div class="empty-state">
+     Choose a video to view its transcript and instructions.
+    </div>
+   </div>
+  </section>
+  <section class="panel report-panel" id="reportPanel">
+   <div class="section-heading">
+    <div>
+     <p class="eyebrow">
+      DOCUMENTATION
+     </p>
+     <h2>
+      AI SOP generation
+     </h2>
+     <p class="muted">
+      Create an editable procedure from your timestamped transcript.
+     </p>
+    </div>
+    <button class="primary" disabled="" id="generateReport">
+     Generate SOP
+    </button>
+   </div>
+   <p class="inline-message" id="aiStatus" role="status">
+    Select a video to check AI configuration.
+   </p>
+   <div hidden="" id="reportEditor">
+    <label>
+     Document title
+     <input id="reportTitle" maxlength="200"/>
+    </label>
+    <label>
+     Overview
+     <textarea id="reportOverview" rows="3"></textarea>
+    </label>
+    <label>
+     Purpose
+     <textarea id="reportPurpose" rows="2"></textarea>
+    </label>
+    <label>
+     Prerequisites (one per line)
+     <textarea id="reportPrereq" rows="3"></textarea>
+    </label>
+    <label>
+     Warnings / notes (one per line)
+     <textarea id="reportWarnings" rows="3"></textarea>
+    </label>
+    <div id="reportSteps">
+    </div>
+    <label>
+     Expected outcome
+     <textarea id="reportOutcome" rows="2"></textarea>
+    </label>
+    <label>
+     Process summary
+     <textarea id="reportSummary" rows="3"></textarea>
+    </label>
+    <div class="button-row">
+     <button class="secondary" id="saveReport">
+      Save edits
+     </button>
+     <button class="primary" id="downloadReport">
+      Download SOP PDF
+     </button>
+    </div>
+   </div>
+  </section>
+ </section>
+</div>
+<dialog id="editor">
+ <form id="stepForm">
+  <h2 id="dialogTitle">
+   Edit step
+  </h2>
+  <label>
+   Step title
+   <input id="stepTitle" maxlength="150" required=""/>
+  </label>
+  <div class="form-grid">
+   <label>
+    Start (seconds)
+    <input id="start" min="0" required="" step="0.1" type="number"/>
+   </label>
+   <label>
+    End (seconds)
+    <input id="end" min="0" required="" step="0.1" type="number"/>
+   </label>
+  </div>
+  <label>
+   Instructions
+   <textarea id="body" required="" rows="6"></textarea>
+  </label>
+  <div class="button-row">
+   <button class="secondary" id="cancel" type="button">
+    Cancel
+   </button>
+   <button class="primary" type="submit">
+    Save step
+   </button>
+  </div>
+ </form>
+</dialog>
+{% endblock %}
+
+{% block scripts %}
+<script defer="" src="{{ url_for('static',filename='app.js') }}">
+</script>
+{% endblock %}
