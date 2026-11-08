@@ -10,6 +10,12 @@ services:
       REPORT_STORAGE: /data/reports
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       DEPLOYMENT_MODE: production
+      # Local AI via the ollama service below. Override any of these in .env if needed.
+      AI_PROVIDER: ${AI_PROVIDER:-openai_compatible}
+      AI_BASE_URL: ${AI_BASE_URL:-http://ollama:11434/v1}
+      AI_API_KEY: ${AI_API_KEY:-ollama}
+      AI_MODEL: ${AI_MODEL:-llama3.2:3b}
+      AI_TIMEOUT_SECONDS: ${AI_TIMEOUT_SECONDS:-600}
     ports:
       - "127.0.0.1:5000:5000"
     volumes:
@@ -17,6 +23,9 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      ollama:
+        condition: service_started
+
   db:
     image: postgres:16-alpine
     restart: unless-stopped
@@ -32,6 +41,37 @@ services:
       timeout: 5s
       retries: 20
     # Intentionally no public host port.
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    environment:
+      # Room for one transcript part plus the reply (default is smaller and cuts input off).
+      OLLAMA_CONTEXT_LENGTH: "8192"
+      # Keep the model loaded between requests so later parts don't reload it.
+      OLLAMA_KEEP_ALIVE: "30m"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    # Intentionally no public host port; only the web service talks to it.
+
+  # One-time job: downloads the model into the ollama_data volume, then exits.
+  # Later runs find the model already there and finish in seconds.
+  ollama-pull:
+    image: ollama/ollama:latest
+    environment:
+      OLLAMA_HOST: ollama:11434
+    entrypoint: ["ollama", "pull", "${AI_MODEL:-llama3.2:3b}"]
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
+
 volumes:
   app_data:
   postgres_data:
+  ollama_data:

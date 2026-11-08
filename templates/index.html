@@ -147,6 +147,16 @@ Training dashboard
     Select a video to check AI configuration.
    </p>
    <div hidden="" id="reportEditor">
+    <p class="inline-message success" id="reportReady"></p>
+    <div class="button-row">
+     <button class="primary" id="downloadReport">
+      Download SOP PDF
+     </button>
+     <button class="secondary" id="toggleReview" type="button">
+      Review / edit steps
+     </button>
+    </div>
+    <div hidden="" id="reportDetails">
     <label>
      Document title
      <input id="reportTitle" maxlength="200"/>
@@ -181,9 +191,7 @@ Training dashboard
      <button class="secondary" id="saveReport">
       Save edits
      </button>
-     <button class="primary" id="downloadReport">
-      Download SOP PDF
-     </button>
+    </div>
     </div>
    </div>
   </section>
