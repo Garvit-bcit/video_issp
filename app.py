@@ -3,7 +3,7 @@
 Routes, database models, authentication, video processing, and SOP exports.
 """
 
-import io, json, os, secrets, sqlite3, subprocess, tempfile, threading, uuid
+import io, json, os, re, secrets, sqlite3, subprocess, tempfile, threading, uuid
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from functools import wraps
@@ -443,29 +443,154 @@ def transcribe(vid):
 def ai_configured():
     return bool(os.getenv('AI_API_KEY') and os.getenv('AI_MODEL') and (os.getenv('AI_PROVIDER', 'openai_compatible').lower() in ('openai', 'openai_compatible')))
 
+SOP_SYSTEM_PROMPT = """You write a work instruction that a new employee can follow on their first day, from part of a timestamped training-video transcript. The speaker talks casually; you turn that into clear, friendly instructions.
+Return only JSON: {"document_title": "...", "overview": "...", "steps": [{"timestamp": "MM:SS", "title": "...", "detail": "...", "value": "...", "verify": "..."}]}
+
+Rules:
+- Write about {target} steps for this part. Each step is one meaningful task; merge small clicks and filler talk into it.
+- title: a short instruction naming the task and object, with counts if spoken (e.g. "Measure the outside diameter (OD) on 25 pieces").
+- detail: one or two plain sentences telling a new employee HOW to do it and linking it to the step before, e.g. "Once the drawing is checked, place each part in the gauge, take the reading and press the foot pedal to record it." Use "you", not "I". No filler words.
+- timestamp: when the step starts, copied from the transcript.
+- value: numbers, ranges or specifications spoken for the step (e.g. "410-426", "73, 75, 73, 70"). Empty string if none.
+- verify: ONLY a real doubt a reviewer must check (a word that may be misheard, numbers that disagree, an unclear quantity or method). Empty string if none. Never write "correct", "done" or "X not found".
+- overview (first part only): two sentences on what the procedure achieves and what equipment is used.
+- Never invent steps, tools or numbers that are not in the transcript.
+
+Example output (format only - it is about a DIFFERENT task; never copy its words, tools or numbers):
+{"document_title": "Replace a Printer Toner Cartridge", "overview": "This procedure replaces the toner cartridge in the office printer and confirms print quality. You will need a new cartridge and the printer's front panel.",
+ "steps": [
+  {"timestamp": "00:12", "title": "Open the front cover and remove the old cartridge", "detail": "Switch the printer to standby first, then pull the front cover down and slide the old cartridge straight out.", "value": "", "verify": ""},
+  {"timestamp": "01:05", "title": "Install the new cartridge", "detail": "Once the old cartridge is out, shake the new one gently, remove the seal and push it in until it clicks.", "value": "Model TN-2420", "verify": "Model number partly inaudible; confirm on the box"},
+  {"timestamp": "02:40", "title": "Print a test page", "detail": "When the cover is closed, open the menu, choose Print Test Page and check that the page is even.", "value": "", "verify": ""}]}"""
+
+# Notes a small model writes that tell the reviewer nothing ("That's correct", "PDF not saved").
+_JUNK_VERIFY = re.compile(r"that'?s correct|^correct|^done|^n/?a$|^none$|\b(not|no) (found|saved|created|selected|entered|"
+                          r"confirmed|minimized|attached|confirmation|updated)\b", re.I)
+# A specification the model put in "verify" instead of "value" ("Has to be between 410 and 426").
+_SPEC_IN_VERIFY = re.compile(r"(?:has to be|supposed to be|should be|must be)?\s*between\s+(\d+(?:\.\d+)?)\s+(?:and|to)\s+(\d+(?:\.\d+)?)", re.I)
+
+
+def _secs(ts):
+    try:
+        m, s = str(ts).strip().strip('[]').split(':')[-2:]
+        return int(m) * 60 + int(float(s))
+    except (ValueError, TypeError):
+        return None
+
+
+def _clean_steps(steps, segments):
+    """Make AI steps reliable: drop junk notes, merge duplicates/near-duplicates,
+    and flag silent gaps in the recording (computed from the transcript, not guessed by the AI)."""
+    out = []
+    for raw in steps:
+        if not isinstance(raw, dict):
+            continue
+        st = {k: str(raw.get(k) or '').strip() for k in ('timestamp', 'title', 'detail', 'value', 'verify')}
+        if not st['title']:
+            continue
+        spec = _SPEC_IN_VERIFY.search(st['verify'])
+        if spec:
+            rng = f'{spec.group(1)}-{spec.group(2)}'
+            st['value'] = f"{st['value']}; spec {rng}" if st['value'] else rng
+            st['verify'] = ''
+        if _JUNK_VERIFY.search(st['verify']):
+            st['verify'] = ''
+        prev = out[-1] if out else None
+        t, pt = _secs(st['timestamp']), _secs(prev['timestamp']) if prev else None
+        same = prev and st['title'].lower() == prev['title'].lower()
+        close = prev and t is not None and pt is not None and t - pt < 10 and len(prev['title']) + len(st['title']) < 90
+        if prev and (same or close):
+            if not same and len(st['title'].split()) >= 3 and len(prev['title'].split()) >= 3:
+                prev['title'] += ', then ' + st['title'][0].lower() + st['title'][1:]
+            elif len(st['title']) > len(prev['title']):
+                prev['title'] = st['title']
+            if st['detail'] and st['detail'] not in prev['detail']:
+                prev['detail'] = (prev['detail'] + ' ' if prev['detail'] else '') + st['detail']
+            for k in ('value', 'verify'):
+                if st[k] and st[k] not in prev[k]:
+                    prev[k] = (prev[k] + '; ' if prev[k] else '') + st[k]
+            continue
+        out.append(st)
+    # Silent gaps of 30 s or more between spoken segments are attached to the step they fall in.
+    for (a_start, a_end), (b_start, _) in zip(segments, segments[1:]):
+        if b_start - a_end >= 30 and out:
+            owner = out[0]
+            for st in out:
+                ts = _secs(st['timestamp'])
+                if ts is not None and ts <= a_end:
+                    owner = st
+            note = f'{stamp(a_end)}-{stamp(b_start)} silent; confirm actions on video'
+            owner['verify'] = (owner['verify'] + '; ' if owner['verify'] else '') + note
+    for st in out:
+        st['requires_review'] = bool(st['verify'])
+    return out
+
+
 def generate_sop(v):
-    transcript = '\n'.join((f'[{stamp(s.start_sec)}] {s.body}' for s in v.steps if s.kind == 'transcript'))
-    if not transcript:
-        transcript = '\n'.join((f'[{stamp(s.start_sec)}] {s.title}: {s.body}' for s in v.steps))
-    if not transcript.strip():
+    src = [s for s in v.steps if s.kind == 'transcript'] or list(v.steps)
+    segments = [(float(s.start_sec or 0), float(s.end_sec or 0)) for s in src]
+
+    class _Row:
+        def __init__(self, start, end, text):
+            self.start_sec, self.end_sec, self.text = start, end, text
+    # Whisper splits speech into fragments ("Past", "rubber", "Id"). Join fragments that run
+    # together (pause under 4 s, passage under 30 s) so the model reads whole sentences.
+    rows = []
+    for s_ in src:
+        text = (s_.body if s_.kind == 'transcript' else f'{s_.title}: {s_.body}').strip()
+        if rows and float(s_.start_sec or 0) - rows[-1].end_sec < 4 and float(s_.start_sec or 0) - rows[-1].start_sec < 30:
+            rows[-1].text += ' ' + text
+            rows[-1].end_sec = float(s_.end_sec or s_.start_sec or 0)
+        else:
+            rows.append(_Row(float(s_.start_sec or 0), float(s_.end_sec or s_.start_sec or 0), text))
+    lines = [f'[{stamp(r.start_sec)}] {r.text}' for r in rows]
+    if not ''.join(lines).strip():
         raise RuntimeError('Transcribe the video or add steps before generating an SOP.')
     if not ai_configured():
         raise RuntimeError('AI report generation is not configured. Set AI_PROVIDER, AI_API_KEY, and AI_MODEL in your environment.')
-    system = 'You create accurate SOPs from training video transcripts. Return only JSON keys document_title, video_title, source_information, overview, purpose, prerequisites (array), warnings (array), steps (array of {title,timestamp,description,notes,expected_result,requires_review}), outcome, summary. Preserve order and timestamps. Never invent unsupported details. Mark unknowns "Not identifiable from transcript — review required" and set requires_review true when uncertain.'
-    payload = {'model': os.getenv('AI_MODEL'), 'temperature': 0.1, 'messages': [{'role': 'system', 'content': system}, {'role': 'user', 'content': f'Video: {v.title}\nSource file: {v.filename}\nTranscript:\n{transcript}'}], 'response_format': {'type': 'json_object'}}
     endpoint = os.getenv('AI_BASE_URL', 'https://api.openai.com/v1/chat/completions').rstrip('/')
     if not endpoint.endswith('/chat/completions'):
         endpoint += '/chat/completions'
-    req = Request(endpoint, data=json.dumps(payload).encode(), headers={'Authorization': 'Bearer ' + os.getenv('AI_API_KEY'), 'Content-Type': 'application/json'}, method='POST')
-    try:
-        with urlopen(req, timeout=int(os.getenv('AI_TIMEOUT_SECONDS', '120'))) as res:
-            data = json.loads(res.read().decode())
-        result = json.loads(data['choices'][0]['message']['content'])
-    except (HTTPError, URLError, TimeoutError, KeyError, ValueError) as e:
-        raise RuntimeError(f'AI report generation failed: {e}') from e
-    if not isinstance(result.get('steps'), list):
-        raise RuntimeError('AI provider returned an invalid SOP structure.')
-    return result
+
+    def ask(part, target, label):
+        system = SOP_SYSTEM_PROMPT.replace('{target}', str(target))
+        payload = {'model': os.getenv('AI_MODEL'), 'temperature': 0.1, 'messages': [{'role': 'system', 'content': system}, {'role': 'user', 'content': f'Video: {v.title}{label}\nTranscript:\n{part}'}], 'response_format': {'type': 'json_object'}}
+        req = Request(endpoint, data=json.dumps(payload).encode(), headers={'Authorization': 'Bearer ' + os.getenv('AI_API_KEY'), 'Content-Type': 'application/json'}, method='POST')
+        try:
+            with urlopen(req, timeout=int(os.getenv('AI_TIMEOUT_SECONDS', '120'))) as res:
+                data = json.loads(res.read().decode())
+            result = json.loads(data['choices'][0]['message']['content'])
+        except (HTTPError, URLError, TimeoutError, KeyError, ValueError) as e:
+            raise RuntimeError(f'AI report generation failed: {e}') from e
+        if not isinstance(result.get('steps'), list):
+            raise RuntimeError('AI provider returned an invalid SOP structure.')
+        return result
+
+    # Long transcripts are sent in parts so a small local model never reads more than it can hold.
+    # Each part gets a step budget of roughly one step per 45 seconds of video.
+    limit = int(os.getenv('AI_CHUNK_CHARS', '5000'))
+    parts, cur, cur_rows = [], [], []
+    for line, row in zip(lines, rows):
+        if cur and sum(len(x) for x in cur) + len(line) > limit:
+            parts.append((cur, cur_rows))
+            cur, cur_rows = [], []
+        cur.append(line)
+        cur_rows.append(row)
+    if cur:
+        parts.append((cur, cur_rows))
+    merged = None
+    for n, (part_lines, part_rows) in enumerate(parts, 1):
+        span = max(0.0, float(part_rows[-1].end_sec or part_rows[-1].start_sec or 0) - float(part_rows[0].start_sec or 0))
+        target = max(2, round(span / 45))
+        label = '' if len(parts) == 1 else f' (part {n} of {len(parts)}; continue the same procedure)'
+        app.logger.info('Generating SOP part %s of %s (~%s steps)', n, len(parts), target)
+        result = ask('\n'.join(part_lines), target, label)
+        if merged is None:
+            merged = result
+        else:
+            merged['steps'].extend(result['steps'])
+    merged['steps'] = _clean_steps(merged['steps'], segments)
+    return merged
 
 @app.get('/api/videos/<vid>/report')
 @login_required
@@ -513,47 +638,100 @@ def edit_report(rid):
         app.logger.exception('Could not refresh cached SOP PDF')
     return jsonify(ok=True)
 
+# PDF fonts: open-licensed (SIL OFL 1.1) look-alikes of the team's study-guide style, bundled in fonts/.
+# Falls back to ReportLab's built-in fonts if the folder is missing.
+_PDF_FONTS = {'serif': 'Times-Roman', 'sans': 'Helvetica', 'sans-bold': 'Helvetica-Bold', 'mono': 'Courier'}
+try:
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    for _key, _name, _file in [('serif', 'SourceSerif4', 'SourceSerif4_400Regular.ttf'), ('sans', 'Inter', 'Inter_400Regular.ttf'),
+                               ('sans-bold', 'Inter-SemiBold', 'Inter_600SemiBold.ttf'), ('mono', 'JetBrainsMono', 'JetBrainsMono_400Regular.ttf')]:
+        pdfmetrics.registerFont(TTFont(_name, str(ROOT / 'fonts' / _file)))
+        _PDF_FONTS[_key] = _name
+    pdfmetrics.registerFontFamily('Inter', normal='Inter', bold='Inter-SemiBold', italic='Inter', boldItalic='Inter-SemiBold')
+except Exception:
+    app.logger.warning('PDF fonts not found in fonts/; using built-in fonts.')
+
+
 def make_pdf(v, c):
+    """Procedure PDF in the study-guide style: serif title and headings, sans body,
+    mono timestamp chips, running header, and "Page X of N" footer."""
+    from reportlab.lib.pagesizes import letter
+    from reportlab.pdfgen import canvas as rl_canvas
     buf = io.BytesIO()
-    styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name='SOPTitle', parent=styles['Title'], fontSize=22, leading=27, textColor=colors.HexColor('#15324b'), alignment=0, spaceAfter=12))
-    styles.add(ParagraphStyle(name='StepHeading', parent=styles['Heading2'], fontSize=13, leading=17, textColor=colors.HexColor('#145da0'), spaceBefore=12, spaceAfter=5, keepWithNext=True))
-    styles['BodyText'].leading = 15
-    styles['BodyText'].spaceAfter = 7
+    F = _PDF_FONTS
+    ink, muted, chip = colors.HexColor('#1f1e1d'), colors.HexColor('#6b6a68'), '#f0efec'
+    st = {
+        'title': ParagraphStyle('title', fontName=F['serif'], fontSize=24, leading=29, textColor=ink, spaceAfter=10),
+        'meta': ParagraphStyle('meta', fontName=F['sans'], fontSize=9.5, leading=13, textColor=ink, spaceAfter=10),
+        'lead': ParagraphStyle('lead', fontName=F['sans'], fontSize=12, leading=17, textColor=ink, spaceAfter=6),
+        'h2': ParagraphStyle('h2', fontName=F['serif'], fontSize=16.5, leading=21, textColor=ink, spaceBefore=16, spaceAfter=6),
+        'step': ParagraphStyle('step', fontName=F['sans-bold'], fontSize=12, leading=16, textColor=ink, spaceBefore=9, spaceAfter=3, keepWithNext=True),
+        'body': ParagraphStyle('body', fontName=F['sans'], fontSize=11, leading=15.5, textColor=ink, spaceAfter=3, leftIndent=18),
+        'note': ParagraphStyle('note', fontName=F['sans'], fontSize=10.5, leading=14.5, textColor=muted, spaceAfter=2, leftIndent=18),
+    }
 
-    def p(t, sty='BodyText'):
-        return Paragraph(escape(str(t or 'Not identifiable from transcript — review required')).replace('\n', '<br/>'), styles[sty])
+    def esc(t):
+        return escape(str(t)).replace('\n', '<br/>')
 
-    def footer(can, doc):
-        can.saveState()
-        can.setStrokeColor(colors.HexColor('#dbe3ec'))
-        can.line(42, 38, A4[0] - 42, 38)
-        can.setFont('Helvetica', 8)
-        can.setFillColor(colors.HexColor('#607286'))
-        can.drawString(42, 25, 'Training Video Workspace • SOP draft for human review')
-        can.drawRightString(A4[0] - 42, 25, f'Page {doc.page}')
-        can.restoreState()
-    doc = SimpleDocTemplate(buf, pagesize=A4, rightMargin=48, leftMargin=48, topMargin=48, bottomMargin=55, title=str(c.get('document_title') or v.title))
-    story = [p(c.get('document_title') or v.title, 'SOPTitle'), p('STANDARD OPERATING PROCEDURE', 'Heading2'), p('Video: ' + v.title), p('Source file: ' + v.filename)]
-    for h, k in [('Process overview', 'overview'), ('Purpose', 'purpose'), ('Required tools and prerequisites', 'prerequisites'), ('Warnings and important notes', 'warnings')]:
-        story.append(p(h, 'Heading2'))
-        value = c.get(k) or ['Not identifiable from transcript — review required'] if k in ('prerequisites', 'warnings') else c.get(k)
-        if isinstance(value, list):
-            story.extend((p('• ' + str(x)) for x in value))
-        else:
-            story.append(p(value))
-    story.append(p('Step-by-step instructions', 'Heading1'))
+    def chip_text(t, font=F['sans']):
+        return f'<font name="{font}" backColor="{chip}">&nbsp;{esc(t)}&nbsp;</font>'
+
+    def label(name, text, sty='note'):
+        return Paragraph(f'<font name="{F["sans-bold"]}" color="#1f1e1d">{name}:</font> {esc(text)}', st[sty])
+
+    doc_title = str(c.get('document_title') or v.title)
+
+    class NumberedCanvas(rl_canvas.Canvas):
+        """Two-pass canvas so the footer can say "Page X of N"."""
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            self._saved = []
+
+        def showPage(self):
+            self._saved.append(dict(self.__dict__))
+            self._startPage()
+
+        def save(self):
+            total = len(self._saved)
+            for state in self._saved:
+                self.__dict__.update(state)
+                w, h = letter
+                self.setFont(F['sans'], 6.5)
+                self.setFillColor(muted)
+                self.drawString(54, h - 30, doc_title)
+                self.drawString(54, 30, 'SOP draft for human review')
+                self.drawRightString(w - 54, 30, f'Page {self._pageNumber} of {total}')
+                super().showPage()
+            super().save()
+
+    doc = SimpleDocTemplate(buf, pagesize=letter, leftMargin=60, rightMargin=60, topMargin=58, bottomMargin=58, title=doc_title)
+    story = [Paragraph(esc(doc_title), st['title']),
+             Paragraph(f'{chip_text("Source video: " + v.title)} &nbsp;·&nbsp; {chip_text("Draft for human review")}', st['meta'])]
+    if c.get('overview'):
+        story.append(Paragraph(esc(c['overview']), st['lead']))
+    # Optional extra sections are printed only when they actually have content.
+    for h, k in [('Prerequisites', 'prerequisites'), ('Warnings', 'warnings')]:
+        items = [x for x in (c.get(k) or []) if str(x).strip()] if isinstance(c.get(k), list) else []
+        if items:
+            story.append(Paragraph(h, st['h2']))
+            story.extend(Paragraph('• ' + esc(x), st['body']) for x in items)
+    story.append(Paragraph('Procedure', st['h2']))
     for i, s in enumerate(c.get('steps', []), 1):
-        block = [p(f"Step {i} — {s.get('title', 'Untitled')} | {s.get('timestamp', 'Review required')}", 'StepHeading'), p(s.get('description'))]
-        if s.get('notes'):
-            block.append(p('Note: ' + str(s['notes'])))
-        if s.get('expected_result'):
-            block.append(p('Expected result: ' + str(s['expected_result'])))
-        if s.get('requires_review'):
-            block.append(p('REVIEW REQUIRED: Verify this step against the source video.'))
+        title = s.get('title') or s.get('description') or 'Untitled step'
+        ts = f'{chip_text(s["timestamp"], F["mono"])}&nbsp; ' if s.get('timestamp') else ''
+        block = [Paragraph(f'{i}.&nbsp; {ts}{esc(title)}', st['step'])]
+        if s.get('detail'):
+            block.append(Paragraph(esc(s['detail']), st['body']))
+        if s.get('value'):
+            block.append(label('Recorded value / specification', s['value']))
+        verify = s.get('verify') or s.get('notes') or ('Confirm against the source video' if s.get('requires_review') else '')
+        if verify:
+            block.append(label('Verify', verify))
         story.append(KeepTogether(block))
-    story.extend([p('Expected overall outcome', 'Heading2'), p(c.get('outcome')), p('Process summary', 'Heading2'), p(c.get('summary'))])
-    doc.build(story, onFirstPage=footer, onLaterPages=footer)
+    if c.get('outcome'):
+        story.extend([Paragraph('Outcome', st['h2']), Paragraph(esc(c['outcome']), st['body'])])
+    doc.build(story, canvasmaker=NumberedCanvas)
     buf.seek(0)
     return buf
 

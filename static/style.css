@@ -3,3 +3,7 @@
 @media(max-width:780px){.sidebar{position:static;width:auto;padding:12px 15px}.brand{padding:0 3px 12px}.sidebar nav{display:flex;overflow-x:auto;gap:3px}.sidebar nav a{white-space:nowrap;padding:9px;font-size:11px}.sidebar-bottom{display:flex;align-items:center;justify-content:space-between;margin-top:10px;border-top:1px solid #2c435a}.user-chip{border:0;padding:9px 3px}.app-shell{margin-left:0}.topbar{min-height:82px;padding:17px 19px}.topbar h1{font-size:20px}.topbar-meta{display:none}.page-content{padding:17px 12px 28px}.dashboard-grid{grid-template-columns:1fr}.library-panel{position:static}.video-list{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}.player-panel video{height:34vh;min-height:180px}.steps-scroll{height:320px}.section-heading{align-items:flex-start}.section-heading .button-row{justify-content:flex-end}.admin-create,.admin-edit{grid-template-columns:1fr}.document-card{align-items:flex-start;flex-direction:column}.hero-panel{padding:24px}.hero-panel h2{font-size:23px}}
 
 .document-card .button-link,.document-card button{flex-shrink:0}
+
+.icon-button,.text-button{border:0}
+.delete-button{display:grid;place-items:center;width:30px;height:30px;padding:0}
+.delete-button:hover{background:#fde9e9;color:var(--red)}
