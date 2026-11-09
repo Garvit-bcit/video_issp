@@ -1,0 +1,24 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Generated Clips' if kind == 'clips' else 'Transcriptions' }} · Training Studio{% endblock %}
+{% block crumb %}RESULT LIBRARY{% endblock %}
+{% block page_heading %}{{ 'Generated Clips' if kind == 'clips' else 'Transcriptions' }}{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="section-heading">
+    <div>
+      <p class="eyebrow">YOUR SAVED RESULTS</p>
+      <h2>{{ 'Choose a video to view its clips' if kind == 'clips' else 'Choose a video to view its transcription' }}</h2>
+    </div>
+  </div>
+  <input id="globalSearch" type="search"
+    placeholder="{{ 'Search videos or clip descriptions' if kind == 'clips' else 'Search videos or transcript text' }}"
+    aria-label="Search saved videos"
+    style="width:100%;max-width:560px;margin-bottom:1rem" />
+  <p id="libraryStatus" class="muted" role="status">Loading saved videos…</p>
+  <div id="globalResults" class="document-list"></div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>window.RESULT_LIBRARY_KIND={{ kind|tojson }};</script>
+<script defer src="{{ url_for('static', filename='results_library.js') }}"></script>
+{% endblock %}

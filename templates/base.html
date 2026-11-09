@@ -6,7 +6,7 @@
   <meta content="{{ csrf_token }}" name="csrf-token"/>
   <title>
    {% block title %}
-Training Video Workspace
+Training Operations Studio
 {% endblock %}
   </title>
   <link href="{{ url_for('static',filename='style.css') }}" rel="stylesheet"/>
@@ -19,25 +19,27 @@ Training Video Workspace
      TV
     </span>
     <span>
-     Training Video
+     Training Studio
      <small>
-      WORKSPACE
+      OPERATIONS
      </small>
     </span>
    </a>
    <nav>
     <a href="{{ url_for('home') }}">
-     Dashboard
+     Overview
     </a>
     <a href="{{ url_for('home') }}#videoList">
      My Videos
     </a>
     <a href="{{ url_for('home') }}#reportPanel">
-     AI Report Generation
+     SOP Generator
     </a>
     <a href="{{ url_for('reports_page') }}">
-     Generated Documents
+     Generated SOPs
     </a>
+    <a href="{{ url_for('results_library', kind='clips') }}">Generated Clips</a>
+    <a href="{{ url_for('results_library', kind='transcripts') }}">Transcriptions</a>
     <a href="{{ url_for('about') }}">
      About
     </a>
@@ -73,21 +75,21 @@ Training Video Workspace
    <header class="topbar">
     <div>
      <span class="eyebrow">
-      WORKSPACE / 
+      STUDIO / 
 {% block crumb %}
 OVERVIEW
 {% endblock %}
      </span>
      <h1>
       {% block page_heading %}
-Training Video Workspace
+Training Operations Studio
 {% endblock %}
      </h1>
     </div>
     <div class="topbar-meta">
      <span class="status-dot">
      </span>
-     Private workspace
+     Internal training platform
     </div>
    </header>
    {% endif %}

@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+ <head>
+  <meta charset="utf-8"/>
+  <meta content="width=device-width,initial-scale=1" name="viewport"/>
+  <meta content="{{ csrf_token }}" name="csrf-token"/>
+  <title>
+   {% block title %}
+Training Operations Studio
+{% endblock %}
+  </title>
+  <link href="{{ url_for('static',filename='style.css') }}" rel="stylesheet"/>
+ </head>
+ <body>
+  {% if current_user.is_authenticated %}
+  <aside class="sidebar">
+   <a class="brand" href="{{ url_for('home') }}">
+    <span class="brand-mark">
+     TV
+    </span>
+    <span>
+     Training Studio
+     <small>
+      OPERATIONS
+     </small>
+    </span>
+   </a>
+   <nav>
+    <a href="{{ url_for('home') }}">
+     Overview
+    </a>
+    <a href="{{ url_for('home') }}#videoList">
+     My Videos
+    </a>
+    <a href="{{ url_for('home') }}#reportPanel">
+     SOP Generator
+    </a>
+    <a href="{{ url_for('reports_page') }}">
+     Generated SOPs
+    </a>
+    <a href="{{ url_for('results_library', kind='clips') }}">Generated Clips</a>
+    <a href="{{ url_for('results_library', kind='transcripts') }}">Transcriptions</a>
+    <a href="{{ url_for('about') }}">
+     About
+    </a>
+    {% if is_admin %}
+    <a href="{{ url_for('admin_page') }}">
+     Admin Panel
+    </a>
+    {% endif %}
+   </nav>
+   <div class="sidebar-bottom">
+    <div class="user-chip">
+     <span class="avatar">
+      {{ current_user.username[:1]|upper }}
+     </span>
+     <span>
+      {{ current_user.username }}
+      <small>
+       {{ current_user.role|title }}
+      </small>
+     </span>
+    </div>
+    <form action="{{ url_for('logout') }}" method="post">
+     <input name="_csrf_token" type="hidden" value="{{ csrf_token }}"/>
+     <button class="nav-logout" type="submit">
+      Log out ↗
+     </button>
+    </form>
+   </div>
+  </aside>
+  {% endif %}
+  <div class="{{ 'app-shell' if current_user.is_authenticated else 'auth-shell' }}">
+   {% if current_user.is_authenticated %}
+   <header class="topbar">
+    <div>
+     <span class="eyebrow">
+      STUDIO / 
+{% block crumb %}
+OVERVIEW
+{% endblock %}
+     </span>
+     <h1>
+      {% block page_heading %}
+Training Operations Studio
+{% endblock %}
+     </h1>
+    </div>
+    <div class="topbar-meta">
+     <span class="status-dot">
+     </span>
+     Internal training platform
+    </div>
+   </header>
+   {% endif %}
+   <main class="page-content">
+    {% with messages=get_flashed_messages(with_categories=true) %}
+
+{% if messages %}
+    <div class="flash-stack">
+     {% for category,message in messages %}
+     <div class="flash {{ category }}">
+      {{ message }}
+     </div>
+     {% endfor %}
+    </div>
+    {% endif %}
+
+{% endwith %}
+
+{% block content %}
+
+{% endblock %}
+   </main>
+  </div>
+  {% block scripts %}
+
+{% endblock %}
+ </body>
+</html>

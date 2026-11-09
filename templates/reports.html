@@ -1,41 +1,32 @@
 {% extends 'base.html' %}
-
-{% block title %}
-Generated documents · Training Video Workspace
-{% endblock %}
-
-{% block crumb %}
-DOCUMENT LIBRARY
-{% endblock %}
-
-{% block page_heading %}
-Generated documents
-{% endblock %}
-
+{% block title %}SOP documents · Training Operations Studio{% endblock %}
+{% block crumb %}DOCUMENT LIBRARY{% endblock %}
+{% block page_heading %}Generated SOP documents{% endblock %}
 {% block content %}
-<section class="panel">
- <div class="section-heading">
-  <div>
-   <h2>
-    Your SOP documents
-   </h2>
-   <p class="muted">
-    Documents remain associated with their source video and workspace owner.
-   </p>
-  </div>
-  <a class="button-link secondary" href="{{ url_for('home') }}">
-   Open dashboard
-  </a>
- </div>
- <div class="document-list" id="documentsList">
-  <p class="muted">
-   Loading documents…
-  </p>
- </div>
+<style>
+/* SOP editor */
+.sop-editor-fields,.sop-edit-step{display:grid;gap:14px}
+.sop-edit-field{display:grid;gap:6px;font-weight:600}
+.sop-edit-field input,.sop-edit-field textarea{width:100%;box-sizing:border-box;font:inherit;padding:10px 12px;border:1px solid #b9c6d3;border-radius:8px;background:var(--surface,#fff);color:inherit}
+.sop-edit-field textarea{resize:vertical;min-height:78px}
+.sop-edit-step{border:1px solid #dce3eb;border-radius:12px;padding:18px;margin:18px 0}
+.sop-review-toggle{display:flex;align-items:center;gap:10px}
+#sopEditorFields{margin:18px 0 26px}
+</style>
+<div class="results-layout"><aside class="panel results-library"><div class="section-heading"><h2>Video library</h2><a href="/" class="button-link secondary">Dashboard</a></div><input type="search" id="videoSearch" placeholder="Search videos" aria-label="Search videos"/><div class="video-list" id="videoNavigation"></div></aside>
+<section class="results-content"><section class="panel"><div class="section-heading"><div><p class="eyebrow">DOCUMENT WORKSPACE</p><h2 id="selectedVideoTitle">Select a video</h2></div><button id="generateSop" class="primary" disabled>Generate SOP</button></div>
+<p id="generationStatus" class="inline-message" role="status">Choose a video to view its documents.</p>
+<div id="generationProgress" class="progress-track" hidden><div class="progress-indeterminate"></div></div><p class="muted" id="progressNote" hidden>Generating a draft with the AI provider and preparing the PDF. This is an activity indicator, not a measured percentage.</p></section>
+<section class="panel"><div class="section-heading"><h2>Documents for this video</h2><input type="search" id="documentSearch" placeholder="Search documents" aria-label="Search documents" class="search-compact"/></div><div id="documentsList" class="document-list"></div></section>
+<section class="panel" id="documentDetail" hidden><div class="section-heading"><h2 id="detailTitle">Document preview</h2><button id="closeDetail" class="secondary">Close</button></div><div id="documentPreview"></div><div class="button-row"><a id="downloadPdf" class="button-link primary">Download SOP PDF</a></div></section>
+<section class="panel" id="sopEditor" hidden>
+  <div class="section-heading"><h2 id="sopEditorTitle">Edit SOP</h2><button type="button" id="cancelSopEdit" class="secondary">Cancel</button></div>
+  <p class="muted">Review and correct the generated instructions before using them for training.</p>
+  <div id="sopEditorFields" class="sop-editor-fields"></div>
+  <div class="section-heading"><h3>Procedure steps</h3><button type="button" id="addSopStep" class="secondary">Add step</button></div>
+  <div id="sopEditorSteps"></div>
+  <div class="button-row"><button type="button" id="saveSopEdit" class="primary">Save changes</button><button type="button" class="secondary" onclick="document.getElementById('cancelSopEdit').click()">Cancel</button></div>
 </section>
+</section></div>
 {% endblock %}
-
-{% block scripts %}
-<script defer="" src="{{ url_for('static',filename='reports.js') }}">
-</script>
-{% endblock %}
+{% block scripts %}<script defer src="{{ url_for('static',filename='reports.js') }}"></script>{% endblock %}

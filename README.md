@@ -23,7 +23,7 @@ A Flask application for turning training recordings into timestamped transcripts
    Copy-Item .env.example .env
    ```
 3. Edit `.env`: set `SECRET_KEY` to a long random value. Keep the existing `.env` safe; do not commit it.
-4. Run `python app.py`, then visit `http://127.0.0.1:5000`.
+4. Run `python app.py`, then visit `http://127.0.0.1:5001`.
 5. Create the initial administrator securely:
 
    ```powershell
@@ -49,7 +49,7 @@ A Flask application for turning training recordings into timestamped transcripts
    ```powershell
    docker compose exec web python scripts_create_admin.py
    ```
-5. Visit `http://127.0.0.1:5000`. Compose binds the web service to loopback only. The database has no host-published port. Volumes `postgres_data` and `app_data` persist PostgreSQL records, uploaded videos and reports across restarts.
+5. Visit `http://127.0.0.1:5001`. Compose binds the web service to loopback only. The database has no host-published port. Volumes `postgres_data` and `app_data` persist PostgreSQL records, uploaded videos and reports across restarts.
 6. Stop without deleting data: `docker compose down`. **Do not use `docker compose down -v` unless you intentionally want to delete persistent volumes.**
 
 For production behind a reverse proxy, enable HTTPS and set `COOKIE_SECURE=true`; configure the proxy, backups, monitoring, and request limits appropriately. Do not expose the app publicly before a security review.

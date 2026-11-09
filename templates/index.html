@@ -68,6 +68,8 @@ Training dashboard
    <p class="inline-message" id="uploadMsg" role="status">
    </p>
   </form>
+  <label for="videoSearch">Search videos</label>
+  <input id="videoSearch" type="search" placeholder="Search by title or status" autocomplete="off"/>
   <div class="video-list" id="videoList">
    <p class="muted">
     Loading your videos…
@@ -89,12 +91,9 @@ Training dashboard
      </p>
     </div>
     <div class="button-row">
-     <button class="secondary" disabled="" id="transcribe">
-      Transcribe
-     </button>
-     <button class="secondary" disabled="" id="pdf">
-      Export draft PDF
-     </button>
+     <button class="secondary" disabled id="generateClips">Generate clips</button>
+     <button class="primary" disabled id="generateReport">Generate SOP</button>
+     <button class="secondary" disabled id="transcribe">Transcribe</button>
     </div>
    </div>
    <video controls="" id="player" preload="metadata">
@@ -126,68 +125,7 @@ Training dashboard
     </div>
    </div>
   </section>
-  <section class="panel report-panel" id="reportPanel">
-   <div class="section-heading">
-    <div>
-     <p class="eyebrow">
-      DOCUMENTATION
-     </p>
-     <h2>
-      AI SOP generation
-     </h2>
-     <p class="muted">
-      Create an editable procedure from your timestamped transcript.
-     </p>
-    </div>
-    <button class="primary" disabled="" id="generateReport">
-     Generate SOP
-    </button>
-   </div>
-   <p class="inline-message" id="aiStatus" role="status">
-    Select a video to check AI configuration.
-   </p>
-   <div hidden="" id="reportEditor">
-    <label>
-     Document title
-     <input id="reportTitle" maxlength="200"/>
-    </label>
-    <label>
-     Overview
-     <textarea id="reportOverview" rows="3"></textarea>
-    </label>
-    <label>
-     Purpose
-     <textarea id="reportPurpose" rows="2"></textarea>
-    </label>
-    <label>
-     Prerequisites (one per line)
-     <textarea id="reportPrereq" rows="3"></textarea>
-    </label>
-    <label>
-     Warnings / notes (one per line)
-     <textarea id="reportWarnings" rows="3"></textarea>
-    </label>
-    <div id="reportSteps">
-    </div>
-    <label>
-     Expected outcome
-     <textarea id="reportOutcome" rows="2"></textarea>
-    </label>
-    <label>
-     Process summary
-     <textarea id="reportSummary" rows="3"></textarea>
-    </label>
-    <div class="button-row">
-     <button class="secondary" id="saveReport">
-      Save edits
-     </button>
-     <button class="primary" id="downloadReport">
-      Download SOP PDF
-     </button>
-    </div>
-   </div>
-  </section>
- </section>
+</section>
 </div>
 <dialog id="editor">
  <form id="stepForm">

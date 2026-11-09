@@ -1,0 +1,36 @@
+const root=document.getElementById('resultsRoot'),id=root.dataset.video,mode=root.dataset.mode;
+const $=x=>document.getElementById(x),csrf=document.querySelector('meta[name=csrf-token]')?.content||'';
+const params=new URLSearchParams(location.search);let videos=[],hasResult=false;
+async function api(url,method='GET'){const r=await fetch(url,{method,headers:{'X-CSRF-Token':csrf}});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||`Request failed (${r.status})`);return d}
+
+// Reuse a saved transcript; otherwise transcribe and wait before generating output.
+const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+async function ensureTranscript(videoId, notify){
+  const path=`/api/videos/${encodeURIComponent(videoId)}`;
+  let video=await api(path);
+  if((video.steps||[]).some(s=>s.kind==='transcript'))return;
+  if(video.status!=='transcribing'){
+    notify('Preparing transcript automatically. This may take several minutes…');
+    await api(`${path}/transcribe`,'POST');
+  }
+  const deadline=Date.now()+30*60*1000;
+  while(Date.now()<deadline){
+    notify('Transcribing video automatically…');
+    await sleep(3000);
+    video=await api(path);
+    if(video.status==='failed')throw Error(video.error||'Automatic transcription failed.');
+    if((video.steps||[]).some(s=>s.kind==='transcript') && video.status!=='transcribing')return;
+    if(video.status!=='transcribing')throw Error('Transcription completed without usable text. Check the video audio.');
+  }
+  throw Error('Transcription is taking longer than 30 minutes. Check the video status and retry.');
+}
+function status(t,error=false){$('resultStatus').textContent=t;$('resultStatus').className='inline-message'+(error?' error':'')}
+function busy(b){$('resultProgress').hidden=!b;$('runAction').disabled=b||hasResult}
+function fmt(t){const n=Math.floor(Number(t)||0);return `${String(Math.floor(n/60)).padStart(2,'0')}:${String(n%60).padStart(2,'0')}`}
+function renderLibrary(){const q=$('resultSearch').value.trim().toLowerCase();$('resultVideos').replaceChildren();for(const v of videos.filter(x=>x.title.toLowerCase().includes(q))){const a=document.createElement('a');a.className='result-video-link'+(v.id===id?' active':'');a.href=`/videos/${encodeURIComponent(v.id)}/${mode}`;a.textContent=v.title;$('resultVideos').append(a)}if(!$('resultVideos').children.length)$('resultVideos').textContent='No matching videos.'}
+function item(title,body){const e=document.createElement('article');e.className='result-item';const h=document.createElement('h3');h.textContent=title;e.append(h);if(body){const p=document.createElement('p');p.textContent=body;e.append(p)}return e}
+async function refresh(){const v=await api(`/api/videos/${encodeURIComponent(id)}`);$('resultTitle').textContent=v.title;$('viewTranscript').href=`/videos/${encodeURIComponent(id)}/transcript`;$('viewClips').href=`/videos/${encodeURIComponent(id)}/clips`;$('viewSop').href=`/reports?video=${encodeURIComponent(id)}`;
+ const list=$('resultItems');list.replaceChildren();if(mode==='transcript'){hasResult=(v.steps||[]).some(s=>s.kind==='transcript');$('runAction').textContent=hasResult?'Transcript available':'Transcribe video';$('resultPlayer').src=`/api/videos/${encodeURIComponent(id)}/file`;for(const s of v.steps||[]){const e=item(`${fmt(s.start_sec)} · ${s.title}`,s.body);e.tabIndex=0;e.onclick=()=>{$('resultPlayer').currentTime=Number(s.start_sec);$('resultPlayer').play().catch(()=>{})};e.onkeydown=ev=>{if(ev.key==='Enter')e.click()};list.append(e)}if(!list.children.length)list.textContent='No transcript available yet.';status(v.status==='transcribing'?'Transcription is running…':v.error||'Transcript ready to review.',!!v.error);if(v.status==='transcribing'){busy(true);setTimeout(()=>refresh().catch(e=>status(e.message,true)),3000)}else busy(false)}else{const d=await api(`/api/videos/${encodeURIComponent(id)}/clips`);hasResult=(d.clips||[]).length>0;$('runAction').textContent=hasResult?'Clips available':'Generate clips';for(const c of d.clips||[]){const e=item(`${c.index}. ${c.title} · ${fmt(c.start)}–${fmt(c.end)}`,c.summary);const player=document.createElement('video');player.controls=true;player.preload='none';player.src=c.url;player.className='result-player';const a=document.createElement('a');a.href=c.url;a.download=`segment-${c.index}.mp4`;a.textContent='Download segment';e.append(player,a);list.append(e)}if(!list.children.length)list.textContent='No generated segments yet.';status((d.clips||[]).length+' segments available.');busy(false);}}
+async function run(){if(hasResult){status('Results already exist. Preview them below.');return}busy(true);status(mode==='transcript'?'Transcription started. This can take several minutes.':'Planning segments and rendering video files. This may take several minutes.');try{if(mode==='transcript'){await api(`/api/videos/${encodeURIComponent(id)}/transcribe`,'POST');await refresh()}else{await ensureTranscript(id,t=>status(t));status('Planning and rendering clips…');await api(`/api/videos/${encodeURIComponent(id)}/clips/generate`,'POST');await refresh()}}catch(e){status(e.message,true)}finally{if(mode==='clips')busy(false)}}
+$('runAction').onclick=run;$('resultSearch').addEventListener('input',renderLibrary);
+(async()=>{try{videos=await api('/api/videos');renderLibrary();await refresh();if(params.get('start')==='1'){history.replaceState(null,'',location.pathname);if(!hasResult&&(mode==='clips'||!['transcribing'].includes((await api(`/api/videos/${encodeURIComponent(id)}`)).status)))await run()}}catch(e){status(e.message,true)}})();

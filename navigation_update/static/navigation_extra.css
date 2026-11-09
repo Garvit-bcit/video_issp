@@ -1,0 +1,5 @@
+/* Navigation-only improvements */
+.video-actions-menu{position:relative;flex-shrink:0}.video-actions-menu summary{cursor:pointer;list-style:none}.video-actions-menu summary::-webkit-details-marker{display:none}
+.video-actions-list{position:absolute;right:0;top:100%;z-index:30;min-width:175px;background:var(--surface,#fff);color:var(--text,#222);border:1px solid #d1d5db;border-radius:9px;box-shadow:0 8px 24px #0002;padding:6px;display:flex;flex-direction:column}
+.video-actions-list a,.video-actions-list button{display:block;text-align:left;padding:9px 11px;background:transparent;border:0;border-radius:6px;text-decoration:none;color:inherit;font:inherit;cursor:pointer}
+.video-actions-list a:hover,.video-actions-list button:hover{background:#eef2f7}.video-actions-list .danger-text{color:#b42318}

@@ -1,3 +1,4 @@
+name: training-clips-groq
 services:
   web:
     build: .
@@ -10,13 +11,21 @@ services:
       REPORT_STORAGE: /data/reports
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       DEPLOYMENT_MODE: production
+      # Groq cloud API; credentials supplied by this project's own .env file.
+      AI_PROVIDER: ${AI_PROVIDER:-openai_compatible}
+      AI_BASE_URL: ${AI_BASE_URL:-https://api.groq.com/openai/v1}
+      AI_API_KEY: ${AI_API_KEY:?Set AI_API_KEY in the Groq project .env}
+      AI_MODEL: ${AI_MODEL:-openai/gpt-oss-20b}
+      AI_TIMEOUT_SECONDS: ${AI_TIMEOUT_SECONDS:-120}
+      AI_CHUNK_CHARS: ${AI_CHUNK_CHARS:-5000}
     ports:
-      - "127.0.0.1:5000:5000"
+      - "127.0.0.1:5002:5001"
     volumes:
       - app_data:/data
     depends_on:
       db:
         condition: service_healthy
+
   db:
     image: postgres:16-alpine
     restart: unless-stopped
@@ -32,6 +41,7 @@ services:
       timeout: 5s
       retries: 20
     # Intentionally no public host port.
+
 volumes:
   app_data:
   postgres_data:

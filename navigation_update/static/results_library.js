@@ -1,0 +1,12 @@
+const kind=window.RESULT_LIBRARY_KIND, search=document.getElementById('globalSearch'),root=document.getElementById('globalResults'),status=document.getElementById('libraryStatus');
+let items=[];
+const fmt=s=>{const n=Math.floor(Number(s)||0);return `${String(Math.floor(n/60)).padStart(2,'0')}:${String(n%60).padStart(2,'0')}`};
+async function get(url){const r=await fetch(url);if(!r.ok)throw Error(`Unable to load saved results (${r.status})`);return r.json()}
+function render(){const q=search.value.trim().toLowerCase();root.replaceChildren();let count=0;
+ for(const x of items){if(!(x.video.title+' '+x.title+' '+x.body).toLowerCase().includes(q))continue;count++;
+ const card=document.createElement('article');card.className='document-card';const info=document.createElement('div');const h=document.createElement('h3');h.textContent=x.title;const p=document.createElement('p');p.className='muted';p.textContent=x.video.title+(x.range?' · '+x.range:'');info.append(h,p);
+ if(x.body){const summary=document.createElement('p');summary.textContent=x.body;info.append(summary)}
+ const actions=document.createElement('div');actions.className='button-row';const open=document.createElement('a');open.className='button-link secondary';open.href=`/videos/${encodeURIComponent(x.video.id)}/${kind==='clips'?'clips':'transcript'}`;open.textContent='Open video results';actions.append(open);
+ if(kind==='clips'){const player=document.createElement('video');player.controls=true;player.preload='none';player.src=x.url;player.className='result-player';info.append(player);const dl=document.createElement('a');dl.className='button-link secondary';dl.href=x.url;dl.download='clip.mp4';dl.textContent='Download clip';actions.append(dl)}
+ card.append(info,actions);root.append(card)}status.textContent=count?`${count} matching result(s)`:'No saved results match your search.'}
+(async()=>{try{const videos=await get('/api/videos');for(const v of videos){try{if(kind==='clips'){const d=await get(`/api/videos/${encodeURIComponent(v.id)}/clips`);for(const c of d.clips||[])items.push({video:v,title:c.title||`Clip ${c.index}`,body:c.summary||'',range:`${fmt(c.start)}–${fmt(c.end)}`,url:c.url})}else{const d=await get(`/api/videos/${encodeURIComponent(v.id)}`);for(const s of d.steps||[])if(s.kind==='transcript')items.push({video:v,title:s.title||`Transcript ${fmt(s.start_sec)}`,body:s.body||'',range:fmt(s.start_sec)})}}catch(e){console.warn('Unable to read results for video',v.id,e)}}render()}catch(e){status.textContent=e.message}})();search.addEventListener('input',render);

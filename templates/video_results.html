@@ -1,0 +1,21 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Transcript' if mode == 'transcript' else 'Video segments' }} · Training Operations Studio{% endblock %}
+{% block crumb %}VIDEO RESULTS{% endblock %}
+{% block page_heading %}{{ 'Transcription' if mode == 'transcript' else 'Generated video segments' }}{% endblock %}
+{% block content %}
+<div class="results-layout" data-video="{{ video_id }}" data-mode="{{ mode }}" id="resultsRoot">
+ <aside class="panel results-library"><div class="section-heading"><h2>Video library</h2><a href="/" class="button-link secondary">Dashboard</a></div>
+  <input type="search" id="resultSearch" placeholder="Search videos" aria-label="Search videos"/><div id="resultVideos" class="video-list"></div></aside>
+ <section class="results-content"><div class="panel"><p class="eyebrow">SELECTED RECORDING</p><h2 id="resultTitle">Loading video…</h2>
+  <div class="button-row result-actions"><a class="button-link secondary" id="viewTranscript">Transcript</a><a class="button-link secondary" id="viewClips">Video segments</a><a class="button-link secondary" id="viewSop">SOP documents</a></div>
+  <p id="resultStatus" class="inline-message" role="status"></p><div id="resultProgress" class="progress-track" hidden><div class="progress-indeterminate"></div></div>
+ </div>
+ {% if mode == 'transcript' %}
+ <section class="panel"><div class="section-heading"><h2>Transcript</h2><button id="runAction" class="primary">Transcribe video</button></div><p class="muted">Select a timestamp to play that part of the recording.</p><video id="resultPlayer" controls preload="metadata" class="result-player"></video><div id="resultItems" class="results-items"></div></section>
+ {% else %}
+ <section class="panel"><div class="section-heading"><h2>Video segments</h2><button id="runAction" class="primary">Generate clips</button></div><div id="resultItems" class="results-items"></div></section>
+ {% endif %}
+ </section>
+</div>
+{% endblock %}
+{% block scripts %}<script defer src="{{ url_for('static',filename='video_results.js') }}"></script>{% endblock %}

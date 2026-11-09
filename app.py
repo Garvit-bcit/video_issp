@@ -3,7 +3,7 @@
 Routes, database models, authentication, video processing, and SOP exports.
 """
 
-import io, json, os, secrets, sqlite3, subprocess, tempfile, threading, uuid
+import io, json, os, re, secrets, sqlite3, subprocess, tempfile, threading, uuid
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from functools import wraps
@@ -28,6 +28,7 @@ REPORTS = Path(os.getenv('REPORT_STORAGE', str(DATA / 'reports'))).resolve()
 for p in (DATA, VIDEOS, REPORTS):
     p.mkdir(parents=True, exist_ok=True)
 app = Flask(__name__)
+app.config["SESSION_COOKIE_NAME"] = "groq_session"
 if os.getenv('DEPLOYMENT_MODE', '').lower() == 'production' and (len(os.getenv('SECRET_KEY', '')) < 32 or 'replace-with' in os.getenv('SECRET_KEY', '').lower()):
     raise RuntimeError('Production requires SECRET_KEY with at least 32 characters.')
 uri = os.getenv('DATABASE_URL', 'sqlite:///' + str(DATA / 'training.db')).replace('postgres://', 'postgresql://', 1)
@@ -146,6 +147,9 @@ def init_db():
         Video.query.filter_by(status='transcribing').update({Video.status: 'failed', Video.error: 'Server restarted; please retry.'})
         db.session.commit()
 init_db()
+
+from clips_feature import install_clips
+install_clips(app, owner_video, VIDEOS)
 
 def stamp(sec):
     n = max(0, int(float(sec or 0)))
@@ -267,6 +271,8 @@ def update_user(uid):
     return redirect(url_for('admin_page'))
 
 def remove_files(v):
+    import shutil
+    shutil.rmtree(VIDEOS / 'clips' / v.id, ignore_errors=True)
     path = (VIDEOS / v.filename).resolve()
     if path.parent == VIDEOS.resolve():
         path.unlink(missing_ok=True)
@@ -443,29 +449,292 @@ def transcribe(vid):
 def ai_configured():
     return bool(os.getenv('AI_API_KEY') and os.getenv('AI_MODEL') and (os.getenv('AI_PROVIDER', 'openai_compatible').lower() in ('openai', 'openai_compatible')))
 
+SOP_SYSTEM_PROMPT = """You write a work instruction that a new employee can follow on their first day, from part of a timestamped training-video transcript. The speaker talks casually; you turn that into clear, friendly instructions.
+Return only JSON: {"document_title": "...", "overview": "...", "steps": [{"timestamp": "MM:SS", "title": "...", "detail": "...", "value": "...", "verify": "..."}]}
+
+Rules:
+- Write about {target} steps for this part. Each step is one meaningful task; merge small clicks and filler talk into it.
+- title: a short instruction naming the task and object, with counts if spoken (e.g. "Measure the outside diameter (OD) on 25 pieces").
+- detail: one or two plain sentences telling a new employee HOW to do it and linking it to the step before, e.g. "Once the drawing is checked, place each part in the gauge, take the reading and press the foot pedal to record it." Use "you", not "I". No filler words.
+- timestamp: when the step starts, copied from the transcript.
+- value: numbers, ranges or specifications spoken for the step (e.g. "410-426", "73, 75, 73, 70"). Empty string if none.
+- verify: ONLY a real doubt a reviewer must check (a word that may be misheard, numbers that disagree, an unclear quantity or method). Empty string if none. Never write "correct", "done" or "X not found".
+- overview (first part only): two sentences on what the procedure achieves and what equipment is used.
+- Never invent steps, tools or numbers that are not in the transcript.
+
+Example output (format only - it is about a DIFFERENT task; never copy its words, tools or numbers):
+{"document_title": "Replace a Printer Toner Cartridge", "overview": "This procedure replaces the toner cartridge in the office printer and confirms print quality. You will need a new cartridge and the printer's front panel.",
+ "steps": [
+  {"timestamp": "00:12", "title": "Open the front cover and remove the old cartridge", "detail": "Switch the printer to standby first, then pull the front cover down and slide the old cartridge straight out.", "value": "", "verify": ""},
+  {"timestamp": "01:05", "title": "Install the new cartridge", "detail": "Once the old cartridge is out, shake the new one gently, remove the seal and push it in until it clicks.", "value": "Model TN-2420", "verify": "Model number partly inaudible; confirm on the box"},
+  {"timestamp": "02:40", "title": "Print a test page", "detail": "When the cover is closed, open the menu, choose Print Test Page and check that the page is even.", "value": "", "verify": ""}]}"""
+
+# Notes a small model writes that tell the reviewer nothing ("That's correct", "PDF not saved").
+_JUNK_VERIFY = re.compile(r"that'?s correct|^correct|^done|^n/?a$|^none$|\b(not|no) (found|saved|created|selected|entered|"
+                          r"confirmed|minimized|attached|confirmation|updated)\b", re.I)
+# A specification the model put in "verify" instead of "value" ("Has to be between 410 and 426").
+_SPEC_IN_VERIFY = re.compile(r"(?:has to be|supposed to be|should be|must be)?\s*between\s+(\d+(?:\.\d+)?)\s+(?:and|to)\s+(\d+(?:\.\d+)?)", re.I)
+
+
+def _secs(ts):
+    try:
+        m, s = str(ts).strip().strip('[]').split(':')[-2:]
+        return int(m) * 60 + int(float(s))
+    except (ValueError, TypeError):
+        return None
+
+
+def _clean_steps(steps, segments):
+    """Make AI steps reliable: drop junk notes, merge duplicates/near-duplicates,
+    and flag silent gaps in the recording (computed from the transcript, not guessed by the AI)."""
+    out = []
+    for raw in steps:
+        if not isinstance(raw, dict):
+            continue
+        st = {k: str(raw.get(k) or '').strip() for k in ('timestamp', 'title', 'detail', 'value', 'verify')}
+        if not st['title']:
+            continue
+        spec = _SPEC_IN_VERIFY.search(st['verify'])
+        if spec:
+            rng = f'{spec.group(1)}-{spec.group(2)}'
+            st['value'] = f"{st['value']}; spec {rng}" if st['value'] else rng
+            st['verify'] = ''
+        if _JUNK_VERIFY.search(st['verify']):
+            st['verify'] = ''
+        prev = out[-1] if out else None
+        t, pt = _secs(st['timestamp']), _secs(prev['timestamp']) if prev else None
+        same = prev and st['title'].lower() == prev['title'].lower()
+        close = prev and t is not None and pt is not None and t - pt < 10 and len(prev['title']) + len(st['title']) < 90
+        if prev and (same or close):
+            if not same and len(st['title'].split()) >= 3 and len(prev['title'].split()) >= 3:
+                prev['title'] += ', then ' + st['title'][0].lower() + st['title'][1:]
+            elif len(st['title']) > len(prev['title']):
+                prev['title'] = st['title']
+            if st['detail'] and st['detail'] not in prev['detail']:
+                prev['detail'] = (prev['detail'] + ' ' if prev['detail'] else '') + st['detail']
+            for k in ('value', 'verify'):
+                if st[k] and st[k] not in prev[k]:
+                    prev[k] = (prev[k] + '; ' if prev[k] else '') + st[k]
+            continue
+        out.append(st)
+    # Silent gaps of 30 s or more between spoken segments are attached to the step they fall in.
+    for (a_start, a_end), (b_start, _) in zip(segments, segments[1:]):
+        if b_start - a_end >= 30 and out:
+            owner = out[0]
+            for st in out:
+                ts = _secs(st['timestamp'])
+                if ts is not None and ts <= a_end:
+                    owner = st
+            note = f'{stamp(a_end)}-{stamp(b_start)} silent; confirm actions on video'
+            owner['verify'] = (owner['verify'] + '; ' if owner['verify'] else '') + note
+    for st in out:
+        st['requires_review'] = bool(st['verify'])
+    return out
+
+
 def generate_sop(v):
-    transcript = '\n'.join((f'[{stamp(s.start_sec)}] {s.body}' for s in v.steps if s.kind == 'transcript'))
-    if not transcript:
-        transcript = '\n'.join((f'[{stamp(s.start_sec)}] {s.title}: {s.body}' for s in v.steps))
-    if not transcript.strip():
+    src = [s for s in v.steps if s.kind == 'transcript'] or list(v.steps)
+    segments = [(float(s.start_sec or 0), float(s.end_sec or 0)) for s in src]
+
+    class _Row:
+        def __init__(self, start, end, text):
+            self.start_sec, self.end_sec, self.text = start, end, text
+    # Whisper splits speech into fragments ("Past", "rubber", "Id"). Join fragments that run
+    # together (pause under 4 s, passage under 30 s) so the model reads whole sentences.
+    rows = []
+    for s_ in src:
+        text = (s_.body if s_.kind == 'transcript' else f'{s_.title}: {s_.body}').strip()
+        if rows and float(s_.start_sec or 0) - rows[-1].end_sec < 4 and float(s_.start_sec or 0) - rows[-1].start_sec < 30:
+            rows[-1].text += ' ' + text
+            rows[-1].end_sec = float(s_.end_sec or s_.start_sec or 0)
+        else:
+            rows.append(_Row(float(s_.start_sec or 0), float(s_.end_sec or s_.start_sec or 0), text))
+    lines = [f'[{stamp(r.start_sec)}] {r.text}' for r in rows]
+    if not ''.join(lines).strip():
         raise RuntimeError('Transcribe the video or add steps before generating an SOP.')
     if not ai_configured():
         raise RuntimeError('AI report generation is not configured. Set AI_PROVIDER, AI_API_KEY, and AI_MODEL in your environment.')
-    system = 'You create accurate SOPs from training video transcripts. Return only JSON keys document_title, video_title, source_information, overview, purpose, prerequisites (array), warnings (array), steps (array of {title,timestamp,description,notes,expected_result,requires_review}), outcome, summary. Preserve order and timestamps. Never invent unsupported details. Mark unknowns "Not identifiable from transcript — review required" and set requires_review true when uncertain.'
-    payload = {'model': os.getenv('AI_MODEL'), 'temperature': 0.1, 'messages': [{'role': 'system', 'content': system}, {'role': 'user', 'content': f'Video: {v.title}\nSource file: {v.filename}\nTranscript:\n{transcript}'}], 'response_format': {'type': 'json_object'}}
     endpoint = os.getenv('AI_BASE_URL', 'https://api.openai.com/v1/chat/completions').rstrip('/')
     if not endpoint.endswith('/chat/completions'):
         endpoint += '/chat/completions'
-    req = Request(endpoint, data=json.dumps(payload).encode(), headers={'Authorization': 'Bearer ' + os.getenv('AI_API_KEY'), 'Content-Type': 'application/json'}, method='POST')
-    try:
-        with urlopen(req, timeout=int(os.getenv('AI_TIMEOUT_SECONDS', '120'))) as res:
-            data = json.loads(res.read().decode())
-        result = json.loads(data['choices'][0]['message']['content'])
-    except (HTTPError, URLError, TimeoutError, KeyError, ValueError) as e:
-        raise RuntimeError(f'AI report generation failed: {e}') from e
-    if not isinstance(result.get('steps'), list):
-        raise RuntimeError('AI provider returned an invalid SOP structure.')
-    return result
+
+    
+    def ask(part, target, label):
+        system = SOP_SYSTEM_PROMPT.replace("{target}", str(target))
+
+        payload = {
+            "model": os.getenv("AI_MODEL"),
+            "temperature": 0.1,
+            "messages": [
+                {"role": "system", "content": system},
+                {
+                    "role": "user",
+                    "content": (
+                        f"Video: {v.title}{label}\n"
+                        f"Transcript:\n{part}"
+                    ),
+                },
+            ],
+            "response_format": {"type": "json_object"},
+        }
+
+        for attempt in range(3):
+            current_payload = payload.copy()
+            current_payload["max_completion_tokens"] = 4096
+
+            if attempt >= 1:
+                # Retry without Groq's enforced JSON mode.
+                current_payload.pop("response_format", None)
+                current_payload["messages"] = [dict(m) for m in payload["messages"]]
+                current_payload["messages"][0]["content"] += (
+                    "\nIMPORTANT: Return a single complete, valid JSON object. "
+                    "Keep each step concise, use no markdown, and close all strings and brackets."
+                )
+                if attempt == 2:
+                    current_payload["messages"][0]["content"] += (
+                        "\nLimit descriptions to one short sentence per step."
+                    )
+
+            req = Request(
+                endpoint,
+                data=json.dumps(current_payload).encode("utf-8"),
+                headers={
+                    "Authorization": "Bearer " + os.environ["AI_API_KEY"],
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "User-Agent": "curl/8.0",
+                },
+                method="POST",
+            )
+
+            try:
+                with urlopen(
+                    req,
+                    timeout=int(os.getenv("AI_TIMEOUT_SECONDS", "120")),
+                ) as res:
+                    data = json.load(res)
+
+                content = (
+                    data["choices"][0]["message"].get("content") or ""
+                ).strip()
+
+                if content.startswith("```"):
+                    content = re.sub(
+                        r"^```(?:json)?\s*|\s*```$",
+                        "",
+                        content,
+                        flags=re.I,
+                    ).strip()
+
+                try:
+                    result = json.loads(content)
+                except json.JSONDecodeError as e:
+                    app.logger.warning(
+                        "SOP response invalid JSON on attempt %s/3 at char %s; "
+                        "finish_reason=%s; response_chars=%s",
+                        attempt + 1, e.pos,
+                        data["choices"][0].get("finish_reason"), len(content),
+                    )
+                    if attempt < 2:
+                        continue
+                    raise RuntimeError(
+                        "Groq returned incomplete or malformed SOP JSON after 3 attempts. "
+                        "Try a shorter transcript chunk (AI_CHUNK_CHARS=1500)."
+                    ) from e
+
+                if not isinstance(result, dict) or not isinstance(
+                    result.get("steps"), list
+                ):
+                    raise RuntimeError(
+                        "AI provider returned an invalid SOP structure."
+                    )
+
+                return result
+
+            except HTTPError as e:
+                error_body = e.read().decode(
+                    "utf-8", errors="replace"
+                )
+
+                if (
+                    attempt < 2
+                    and e.code == 400
+                    and "json_validate_failed" in error_body
+                ):
+                    app.logger.warning(
+                        "Groq JSON validation failed; retrying "
+                        "SOP without enforced JSON mode."
+                    )
+                    continue
+
+                app.logger.error(
+                    "SOP AI request failed: HTTP %s: %s",
+                    e.code,
+                    error_body[:2000],
+                )
+
+                raise RuntimeError(
+                    f"AI report generation failed: HTTP {e.code}"
+                ) from e
+
+            except (URLError, TimeoutError, KeyError, ValueError) as e:
+                raise RuntimeError(
+                    f"AI report generation failed: {e}"
+                ) from e
+
+
+    # Long transcripts are sent in parts so a small local model never reads more than it can hold.
+    # Each part gets a step budget of roughly one step per 45 seconds of video.
+    limit = int(os.getenv('AI_CHUNK_CHARS', '2000'))
+    parts, cur, cur_rows = [], [], []
+    for line, row in zip(lines, rows):
+        if cur and sum(len(x) for x in cur) + len(line) > limit:
+            parts.append((cur, cur_rows))
+            cur, cur_rows = [], []
+        cur.append(line)
+        cur_rows.append(row)
+    if cur:
+        parts.append((cur, cur_rows))
+    merged = None
+    for n, (part_lines, part_rows) in enumerate(parts, 1):
+        span = max(0.0, float(part_rows[-1].end_sec or part_rows[-1].start_sec or 0) - float(part_rows[0].start_sec or 0))
+        target = max(2, round(span / 45))
+        label = '' if len(parts) == 1 else f' (part {n} of {len(parts)}; continue the same procedure)'
+        app.logger.info('Generating SOP part %s of %s (~%s steps)', n, len(parts), target)
+        result = ask('\n'.join(part_lines), target, label)
+        if merged is None:
+            merged = result
+        else:
+            merged['steps'].extend(result['steps'])
+    merged['steps'] = _clean_steps(merged['steps'], segments)
+    # Retain teammate's review fields while adapting to the studio document UI/PDF.
+    for step in merged['steps']:
+        step['description'] = step.get('detail', '')
+        step['notes'] = '; '.join(x for x in [step.get('value', ''), step.get('verify', '')] if x)
+        step['expected_result'] = step.get('value', '')
+    merged.setdefault('video_title', v.title)
+    merged.setdefault('purpose', merged.get('overview', ''))
+    merged.setdefault('prerequisites', [])
+    merged.setdefault('warnings', [])
+    merged.setdefault('outcome', '')
+    merged.setdefault('summary', '')
+    return merged
+
+@app.get('/api/videos/<vid>/outputs')
+@login_required
+def video_outputs(vid):
+    v = owner_video(vid)
+    has_report = Report.query.filter_by(video_id=v.id, user_id=current_user.id).first() is not None
+    # The existing clips endpoint is the authority on clip availability.
+    manifest_path = VIDEOS / 'clips' / v.id / 'manifest.json'
+    has_clips = False
+    if manifest_path.is_file():
+        try:
+            has_clips = bool(json.loads(manifest_path.read_text(encoding='utf-8')).get('clips'))
+        except (OSError, ValueError, TypeError):
+            pass
+    return jsonify(transcript=any(s.kind == 'transcript' for s in v.steps),
+                   sop=has_report, clips=has_clips, status=v.status)
 
 @app.get('/api/videos/<vid>/report')
 @login_required
@@ -491,6 +760,14 @@ def generate_report(vid):
     except Exception:
         app.logger.exception('Could not cache generated SOP PDF')
     return (jsonify(id=r.id, title=r.title, content=content), 201)
+
+@app.get('/api/reports/<int:rid>')
+@login_required
+def report_detail(rid):
+    r = db.session.get(Report, rid)
+    if not r or r.user_id != current_user.id:
+        abort(404)
+    return jsonify(id=r.id, title=r.title, video_id=r.video_id, content=json.loads(r.content_json))
 
 @app.put('/api/reports/<int:rid>')
 @login_required
@@ -556,6 +833,25 @@ def make_pdf(v, c):
     doc.build(story, onFirstPage=footer, onLaterPages=footer)
     buf.seek(0)
     return buf
+
+@app.get('/videos/<vid>/transcript')
+@login_required
+def transcript_page(vid):
+    owner_video(vid)
+    return render_template('video_results.html', mode='transcript', video_id=vid)
+
+@app.get('/videos/<vid>/clips')
+@login_required
+def clips_page(vid):
+    owner_video(vid)
+    return render_template('video_results.html', mode='clips', video_id=vid)
+
+@app.get('/library/<kind>')
+@login_required
+def results_library(kind):
+    if kind not in ('clips', 'transcripts'):
+        abort(404)
+    return render_template('results_library.html', kind=kind)
 
 @app.get('/reports')
 @login_required

@@ -27,8 +27,8 @@ RUN mkdir -p /data/videos /data/reports
 ENV DATA_DIR=/data \
     VIDEO_STORAGE=/data/videos \
     REPORT_STORAGE=/data/reports \
-    PORT=5000
+    PORT=5001
 
-EXPOSE 5000
+EXPOSE 5001
 
-CMD ["gunicorn", "--workers", "1", "--threads", "4", "--timeout", "1800", "--bind", "0.0.0.0:5000", "app:app"]
+CMD ["gunicorn", "--workers", "1", "--threads", "4", "--timeout", "1800", "--bind", "0.0.0.0:5001", "app:app"]
